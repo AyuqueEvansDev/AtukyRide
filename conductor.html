@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html class="light" lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<title>ChasquiMoto - Conductor</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL@20..48,100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet"/>
+<link href="assets/styles.css" rel="stylesheet"/>
+<style>
+html, body { height: 100%; overflow: hidden; margin: 0; padding: 0; }
+#driver-dashboard { position: relative; height: 100%; }
+#map { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 0; }
+.leaflet-control-zoom a { background: white !important; color: #191b23 !important; }
+.leaflet-popup-content-wrapper { border-radius: 12px !important; font-family: 'Inter', sans-serif !important; }
+.leaflet-popup-content { margin: 12px 16px !important; font-size: 14px !important; }
+.driver-panel { position: absolute; left: 0; right: 0; bottom: 0; z-index: 10; padding: 0 12px calc(72px + env(safe-area-inset-bottom, 0px)); pointer-events: none; }
+.driver-panel > * { pointer-events: auto; }
+@media (min-width: 640px) { .driver-panel { padding: 0 16px calc(80px + env(safe-area-inset-bottom, 0px)); } }
+@media (min-width: 768px) { .driver-panel { max-width: 400px; left: 24px; right: auto; bottom: 100px; padding: 0; } }
+@media (min-width: 1024px) { .driver-panel { max-width: 420px; left: 40px; bottom: 120px; } }
+.request-card { background: white; border-radius: 16px; padding: 16px; box-shadow: 0 10px 30px rgba(30,41,59,0.15); margin-bottom: 10px; }
+.status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.polling-refresh { cursor: pointer; user-select: none; }
+</style>
+</head>
+<body>
+<div id="driver-dashboard" class="hidden">
+<div id="map"></div>
+<header class="fixed top-0 left-0 right-0 z-[1000] bg-white/80 backdrop-blur-md shadow-sm flex items-center justify-between px-3 h-11 md:px-5 md:h-14">
+  <div class="flex items-center gap-2">
+    <span class="material-symbols-outlined text-[#004ac6] text-[22px] md:text-[24px]">motorcycle</span>
+    <h1 class="text-[18px] md:text-[22px] font-bold text-[#004ac6]">Conductor</h1>
+  </div>
+  <div class="flex items-center gap-3">
+    <span id="available-badge" class="flex items-center gap-1.5 text-xs font-medium text-[#2e7d32] bg-[#e8f5e9] px-3 py-1 rounded-full">
+      <span class="w-1.5 h-1.5 bg-[#2e7d32] rounded-full"></span>
+      Disponible
+    </span>
+    <div class="relative">
+      <button id="avatar-btn" class="w-7 h-7 md:w-8 md:h-8 rounded-full overflow-hidden border-2 border-[#2563eb] bg-[#004ac6] text-white text-xs font-medium md:text-sm flex items-center justify-center cursor-pointer hover:opacity-80 transition-opacity"></button>
+      <div id="dropdown-menu" class="hidden absolute right-0 mt-2 w-48 md:w-56 bg-white rounded-xl shadow-[0_10px_30px_rgba(30,41,59,0.15)] border border-[#c3c6d7]/50 overflow-hidden z-[1001]">
+        <div class="px-3 md:px-4 py-2 md:py-3 border-b border-[#c3c6d7]/30">
+          <p id="drop-name" class="text-sm font-medium text-[#191b23] truncate"></p>
+          <p id="drop-email" class="text-xs text-[#434655] truncate"></p>
+          <span id="drop-role" class="inline-block mt-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#d5e0f8] text-[#004ac6]"></span>
+        </div>
+        <button id="toggle-available" class="w-full flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2.5 md:py-3 text-sm md:text-base text-[#191b23] hover:bg-[#f3f3fe] transition-colors">
+          <span class="material-symbols-outlined text-[#737686] text-[20px] md:text-[24px]">power_settings_new</span>
+          <span id="toggle-avail-text">Desconectarse</span>
+        </button>
+        <button id="logout-btn" class="w-full flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2.5 md:py-3 text-sm md:text-base text-[#191b23] hover:bg-[#ffdad6]/20 hover:text-[#ba1a1a] transition-colors">
+          <span class="material-symbols-outlined text-[#737686] text-[20px] md:text-[24px]">logout</span>
+          Cerrar Sesión
+        </button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div id="status-bar" class="fixed top-14 md:top-16 left-1/2 -translate-x-1/2 z-[500] bg-white/90 backdrop-blur shadow-lg px-4 py-1.5 md:py-2 rounded-full flex items-center gap-2 border border-[#c3c6d7] hidden">
+  <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse-dot"></span>
+  <span class="text-xs md:text-sm text-[#434655] font-medium" id="status-text">Esperando solicitudes...</span>
+</div>
+
+<div class="driver-panel" id="driver-panel">
+  <div id="panel-content">
+    <div id="requests-view" class="animate-slide-up">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-sm font-bold text-[#191b23]">Solicitudes disponibles</h2>
+        <button id="refresh-btn" class="text-xs text-[#004ac6] font-medium hover:underline flex items-center gap-1">
+          <span class="material-symbols-outlined text-[16px]">refresh</span> Actualizar
+        </button>
+      </div>
+      <div id="requests-list" class="space-y-2 max-h-[280px] md:max-h-[320px] overflow-y-auto hide-scrollbar">
+        <div class="text-center py-6 text-sm text-[#737686]">
+          <span class="material-symbols-outlined text-[32px] block mb-2">radar</span>
+          Esperando solicitudes de viaje...
+        </div>
+      </div>
+    </div>
+
+    <div id="active-ride-view" class="hidden"></div>
+  </div>
+</div>
+
+<nav class="fixed bottom-0 left-0 right-0 z-[1000] rounded-t-xl bg-white/90 backdrop-blur-md shadow-[0_-2px_12px_rgba(30,41,59,0.1)] flex justify-around items-center pb-safe pt-1 md:pt-1.5 px-3 md:px-5">
+  <button class="flex flex-col items-center gap-0.5 text-[#004ac6] py-1.5 md:py-2 transition-all min-w-0">
+    <span class="material-symbols-outlined text-[20px] md:text-[24px]" style="font-variation-settings:'FILL' 1;">radar</span>
+    <span class="text-[10px] md:text-xs font-semibold">Solicitudes</span>
+  </button>
+  <button class="flex flex-col items-center gap-0.5 text-[#545f73] py-1.5 md:py-2 transition-all min-w-0">
+    <span class="material-symbols-outlined text-[20px] md:text-[24px]">history</span>
+    <span class="text-[10px] md:text-xs font-semibold">Historial</span>
+  </button>
+  <button class="flex flex-col items-center gap-0.5 text-[#545f73] py-1.5 md:py-2 transition-all min-w-0">
+    <span class="material-symbols-outlined text-[20px] md:text-[24px]">person</span>
+    <span class="text-[10px] md:text-xs font-semibold">Perfil</span>
+  </button>
+</nav>
+</div>
+
+<div id="auth-overlay" class="hidden fixed inset-0 z-[2000] bg-surface flex flex-col items-center justify-center px-5 overflow-y-auto">
+  <div class="w-full max-w-sm py-8">
+    <div class="text-center mb-6">
+      <span class="material-symbols-outlined text-[#004ac6] text-[48px]" style="font-variation-settings:'FILL' 1;">motorcycle</span>
+      <h2 class="text-2xl font-bold text-[#191b23] mt-2">Zona de Conductores</h2>
+      <p class="text-sm text-[#434655] mt-1">Inicia sesión o regístrate para ofrecer viajes</p>
+    </div>
+
+    <div id="auth-error" class="hidden bg-[#ffdad6] text-[#93000a] text-sm font-medium rounded-xl p-3 text-center mb-4"></div>
+
+    <div class="flex mb-4">
+      <button id="auth-tab-login" class="flex-1 py-2 text-sm font-semibold text-[#004ac6] border-b-2 border-[#004ac6]">Iniciar Sesión</button>
+      <button id="auth-tab-register" class="flex-1 py-2 text-sm font-semibold text-[#737686] border-b-2 border-transparent">Registrarse</button>
+    </div>
+
+    <form id="auth-login-form" class="flex flex-col gap-4">
+      <div>
+        <label class="text-sm font-medium text-[#434655] ml-1 block mb-1" for="auth-login-email">Correo Electrónico</label>
+        <input class="w-full h-14 bg-[#ededf9] px-4 rounded-xl border-none text-[#191b23] placeholder:text-[#737686] focus:ring-2 focus:ring-[#004ac6] outline-none" id="auth-login-email" placeholder="nombre@ejemplo.com" type="email"/>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-[#434655] ml-1 block mb-1" for="auth-login-pass">Contraseña</label>
+        <input class="w-full h-14 bg-[#ededf9] px-4 rounded-xl border-none text-[#191b23] placeholder:text-[#737686] focus:ring-2 focus:ring-[#004ac6] outline-none" id="auth-login-pass" placeholder="••••••••" type="password"/>
+      </div>
+      <button class="w-full h-14 bg-[#004ac6] text-white font-semibold rounded-xl hover:bg-[#2563eb] active:scale-95 transition-all" type="submit">Iniciar Sesión</button>
+      <p class="text-center text-xs text-[#737686]">¿No eres conductor? <a href="principal.html" class="text-[#004ac6] font-semibold hover:underline">Ir a usuario</a></p>
+    </form>
+
+    <form id="auth-reg-form" class="hidden flex-col gap-4">
+      <div>
+        <label class="text-sm font-medium text-[#434655] ml-1 block mb-1" for="auth-reg-name">Nombre Completo</label>
+        <input class="w-full h-14 bg-[#ededf9] px-4 rounded-xl border-none text-[#191b23] placeholder:text-[#737686] focus:ring-2 focus:ring-[#004ac6] outline-none" id="auth-reg-name" placeholder="Ej. Juan Pérez" type="text"/>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-[#434655] ml-1 block mb-1" for="auth-reg-email">Correo Electrónico</label>
+        <input class="w-full h-14 bg-[#ededf9] px-4 rounded-xl border-none text-[#191b23] placeholder:text-[#737686] focus:ring-2 focus:ring-[#004ac6] outline-none" id="auth-reg-email" placeholder="nombre@ejemplo.com" type="email"/>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-[#434655] ml-1 block mb-1" for="auth-reg-phone">Teléfono</label>
+        <input class="w-full h-14 bg-[#ededf9] px-4 rounded-xl border-none text-[#191b23] placeholder:text-[#737686] focus:ring-2 focus:ring-[#004ac6] outline-none" id="auth-reg-phone" placeholder="+52 55 0000 0000" type="tel"/>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-[#434655] ml-1 block mb-1" for="auth-reg-pass">Contraseña</label>
+        <input class="w-full h-14 bg-[#ededf9] px-4 rounded-xl border-none text-[#191b23] placeholder:text-[#737686] focus:ring-2 focus:ring-[#004ac6] outline-none" id="auth-reg-pass" placeholder="••••••••" type="password"/>
+      </div>
+      <div class="p-4 bg-[#f3f3fe] rounded-xl flex flex-col gap-3">
+        <p class="text-sm font-semibold text-[#004ac6]">Información del vehículo</p>
+        <input class="w-full h-12 px-4 bg-white rounded-xl border border-[#c3c6d7] text-[#191b23] placeholder:text-[#c3c6d7] focus:ring-2 focus:ring-[#004ac6] outline-none" id="auth-reg-model" placeholder="Modelo (ej. Toyota Prius)"/>
+        <input class="w-full h-12 px-4 bg-white rounded-xl border border-[#c3c6d7] text-[#191b23] placeholder:text-[#c3c6d7] focus:ring-2 focus:ring-[#004ac6] outline-none" id="auth-reg-color" placeholder="Color (ej. Plata)"/>
+        <input class="w-full h-12 px-4 bg-white rounded-xl border border-[#c3c6d7] text-[#191b23] placeholder:text-[#c3c6d7] focus:ring-2 focus:ring-[#004ac6] outline-none" id="auth-reg-plate" placeholder="Placa (ej. ABC-123)"/>
+      </div>
+      <button class="w-full h-14 bg-[#004ac6] text-white font-semibold rounded-xl hover:bg-[#2563eb] active:scale-95 transition-all" type="submit">Registrarse como Conductor</button>
+    </form>
+
+    <p class="text-center text-sm text-[#434655] mt-4">
+      <a href="index.html" class="text-[#737686] hover:text-[#004ac6]">Volver al inicio</a>
+    </p>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="assets/app.js"></script>
+<script>
+let driver = null;
+let driverAvailable = true;
+let activeRideId = null;
+let map = null;
+let driverMarker = null;
+let userPickupMarker = null;
+let routeLine = null;
+let pollInterval = null;
+
+function initDriverUI() {
+  driver = APP.getCurrentUser();
+  if (!driver || driver.role !== 'driver') {
+    document.getElementById('auth-overlay').classList.remove('hidden');
+    document.getElementById('driver-dashboard').classList.add('hidden');
+    return;
+  }
+  document.getElementById('auth-overlay').classList.add('hidden');
+  document.getElementById('driver-dashboard').classList.remove('hidden');
+
+  document.getElementById('avatar-btn').textContent = driver.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  document.getElementById('drop-name').textContent = driver.name;
+  document.getElementById('drop-email').textContent = driver.email;
+  document.getElementById('drop-role').textContent = 'Conductor';
+  if (driver.car) {
+    document.getElementById('drop-name').textContent = driver.name + ' · ' + driver.car.plate;
+  }
+
+  document.getElementById('toggle-available').addEventListener('click', () => {
+    driverAvailable = !driverAvailable;
+    APP.setDriverAvailable(driver.email, driverAvailable);
+    const badge = document.getElementById('available-badge');
+    const text = document.getElementById('toggle-avail-text');
+    if (driverAvailable) {
+      badge.innerHTML = '<span class="w-1.5 h-1.5 bg-[#2e7d32] rounded-full"></span> Disponible';
+      badge.className = 'flex items-center gap-1.5 text-xs font-medium text-[#2e7d32] bg-[#e8f5e9] px-3 py-1 rounded-full';
+      text.textContent = 'Desconectarse';
+      document.getElementById('status-bar').classList.remove('hidden');
+      startPolling();
+    } else {
+      badge.innerHTML = '<span class="w-1.5 h-1.5 bg-[#737686] rounded-full"></span> Desconectado';
+      badge.className = 'flex items-center gap-1.5 text-xs font-medium text-[#737686] bg-[#f3f3fe] px-3 py-1 rounded-full';
+      text.textContent = 'Conectarse';
+      document.getElementById('status-bar').classList.add('hidden');
+      stopPolling();
+    }
+  });
+
+  document.getElementById('refresh-btn').addEventListener('click', loadRequests);
+
+  initMap();
+  startPolling();
+}
+
+function initMap() {
+  if (map) return;
+
+  if (!navigator.geolocation) {
+    initMapWithCoords(-12.0464, -77.0428);
+    return;
+  }
+  let geoDone = false;
+  setTimeout(() => { if (!geoDone) { geoDone = true; initMapWithCoords(-12.0464, -77.0428); } }, 5000);
+  navigator.geolocation.getCurrentPosition(
+    p => { if (!geoDone) { geoDone = true; initMapWithCoords(p.coords.latitude, p.coords.longitude); } },
+    () => { if (!geoDone) { geoDone = true; initMapWithCoords(-12.0464, -77.0428); } },
+    { enableHighAccuracy: false, timeout: 4000, maximumAge: 120000 }
+  );
+}
+
+function initMapWithCoords(lat, lng) {
+  const w = window.innerWidth;
+  map = L.map('map', {
+    center: [lat, lng],
+    zoom: w < 640 ? 12 : 13,
+    zoomControl: w >= 768,
+    attributionControl: false
+  });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+  const icon = L.divIcon({
+    html: '<div style="background:#004ac6;width:16px;height:16px;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.3)"></div>',
+    iconSize: [16, 16], iconAnchor: [8, 8], className: ''
+  });
+  driverMarker = L.marker([lat, lng], { icon }).addTo(map).bindPopup('Tu ubicación').openPopup();
+  APP.updateDriverLocation(driver.email, lat, lng);
+  document.getElementById('status-bar').classList.remove('hidden');
+  setTimeout(() => map.invalidateSize(), 100);
+}
+
+function loadRequests() {
+  const rides = APP.getPendingRidesForDrivers();
+  const list = document.getElementById('requests-list');
+
+  if (rides.length === 0) {
+    list.innerHTML = `
+      <div class="text-center py-6 text-sm text-[#737686]">
+        <span class="material-symbols-outlined text-[32px] block mb-2">radar</span>
+        Esperando solicitudes de viaje...
+      </div>
+    `;
+    return;
+  }
+
+  list.innerHTML = rides.map((r, i) => {
+    const user_ = APP.getUsers().find(u => u.email === r.userEmail);
+    const userName = user_ ? user_.name : 'Usuario';
+    const initials = userName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    return `
+      <div class="request-card animate-slide-up">
+        <div class="flex items-center gap-3">
+          <div class="w-11 h-11 rounded-full bg-[#2563eb]/10 text-[#004ac6] flex items-center justify-center text-base font-bold flex-shrink-0">${initials}</div>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-semibold text-[#191b23]">${userName}</p>
+            <p class="text-xs text-[#434655] truncate">${r.fromName || 'Recoger'} → ${r.toName ? r.toName.slice(0, 40) : 'Destino'}</p>
+          </div>
+        </div>
+        <button class="accept-btn w-full mt-3 h-10 bg-[#004ac6] text-white text-sm font-semibold rounded-xl hover:bg-[#2563eb] active:scale-[0.98] transition-all" data-ride-id="${r.id}">
+          Aceptar Viaje
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  list.querySelectorAll('.accept-btn').forEach(btn => {
+    btn.addEventListener('click', () => acceptRide(btn.dataset.rideId));
+  });
+}
+
+function acceptRide(rideId) {
+  const ride = APP.getRides().find(r => r.id === rideId);
+  if (!ride || ride.status !== 'searching') {
+    loadRequests();
+    return;
+  }
+
+  const rides = APP.getRides();
+  const r = rides.find(x => x.id === rideId);
+  if (!r) return;
+
+  r.driverEmail = driver.email;
+  r.status = 'accepted';
+  r.acceptedAt = Date.now();
+  APP.saveRides(rides);
+  APP.setDriverAvailable(driver.email, false);
+  activeRideId = rideId;
+
+  document.getElementById('available-badge').innerHTML = '<span class="w-1.5 h-1.5 bg-[#f59e0b] rounded-full"></span> En viaje';
+  document.getElementById('available-badge').className = 'flex items-center gap-1.5 text-xs font-medium text-[#f59e0b] bg-[#fef3c7] px-3 py-1 rounded-full';
+
+  showActiveRide(r);
+  stopPolling();
+}
+
+function showActiveRide(ride) {
+  const user_ = APP.getUsers().find(u => u.email === ride.userEmail);
+  const userName = user_ ? user_.name : 'Usuario';
+  const initials = userName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+
+  document.getElementById('requests-view').classList.add('hidden');
+  const activeView = document.getElementById('active-ride-view');
+  activeView.classList.remove('hidden');
+
+  document.getElementById('status-text').textContent = 'Viaje aceptado';
+
+  if (userPickupMarker) map.removeLayer(userPickupMarker);
+
+  const userIcon = L.divIcon({
+    html: '<div style="background:#bc4800;width:14px;height:14px;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.3)"></div>',
+    iconSize: [14, 14], iconAnchor: [7, 7], className: ''
+  });
+
+  if (ride.fromLat && ride.fromLng) {
+    userPickupMarker = L.marker([ride.fromLat, ride.fromLng], { icon: userIcon }).addTo(map)
+      .bindPopup(`<b>${userName}</b><br/>Punto de recogida`);
+    if (driverMarker) {
+      const group = L.featureGroup([driverMarker, userPickupMarker]);
+      map.fitBounds(group.getBounds().pad(0.2));
+    }
+  }
+
+  activeView.innerHTML = `
+    <div class="bg-white rounded-2xl p-4 md:p-5 shadow-[0_10px_30px_rgba(30,41,59,0.15)] animate-slide-up">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-12 h-12 rounded-full bg-[#2563eb]/10 text-[#004ac6] flex items-center justify-center text-lg font-bold flex-shrink-0">${initials}</div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-bold text-[#191b23]">${userName}</p>
+          <p class="text-xs text-[#434655] truncate">${ride.toName ? ride.toName.slice(0, 50) : 'Destino'}</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3 p-3 bg-[#fef3c7] rounded-xl mb-4">
+        <span class="material-symbols-outlined text-[#f59e0b]" style="font-variation-settings:'FILL' 1;">info</span>
+        <p class="text-xs text-[#92400e]">Dirígete al punto de recogida del usuario.</p>
+      </div>
+
+      <div class="flex gap-3">
+        <button id="arrived-btn" class="flex-1 h-11 bg-[#2e7d32] text-white text-sm font-semibold rounded-xl hover:bg-[#1b5e20] transition-all">
+          Llegué al usuario
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('arrived-btn').addEventListener('click', () => {
+    APP.driverArrived(ride.id);
+    showArrivedView(ride, userName, initials);
+  });
+}
+
+let tripPollInterval = null;
+
+function startTripPolling(ride, userName, initials) {
+  stopTripPolling();
+  tripPollInterval = setInterval(() => {
+    const rides = APP.getRides();
+    const currentRide = rides.find(r => r.id === ride.id);
+    if (!currentRide) { stopTripPolling(); return; }
+    if (currentRide.status === 'in_progress') {
+      stopTripPolling();
+      showTripInProgress(ride, userName, initials);
+    }
+  }, 2000);
+}
+
+function stopTripPolling() {
+  if (tripPollInterval) { clearInterval(tripPollInterval); tripPollInterval = null; }
+}
+
+function showArrivedView(ride, userName, initials) {
+  const activeView = document.getElementById('active-ride-view');
+  document.getElementById('status-text').textContent = 'Llegaste al usuario';
+
+  activeView.innerHTML = `
+    <div class="bg-white rounded-2xl p-4 md:p-5 shadow-[0_10px_30px_rgba(30,41,59,0.15)] animate-slide-up">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-12 h-12 rounded-full bg-[#e8f5e9] text-[#2e7d32] flex items-center justify-center">
+          <span class="material-symbols-outlined text-[28px]" style="font-variation-settings:'FILL' 1;">check_circle</span>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-bold text-[#191b23]">${userName}</p>
+          <p class="text-xs text-[#2e7d32] font-medium">Llegaste al usuario</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3 p-3 bg-[#e8f5e9] rounded-xl mb-4">
+        <span class="material-symbols-outlined text-[#2e7d32]">hourglass_top</span>
+        <p class="text-xs text-[#1b5e20]">Esperando que el usuario inicie el viaje...</p>
+      </div>
+    </div>
+  `;
+
+  startTripPolling(ride, userName, initials);
+}
+
+function showTripInProgress(ride, userName, initials) {
+  const activeView = document.getElementById('active-ride-view');
+  document.getElementById('status-text').textContent = 'Viaje en curso';
+
+  activeView.innerHTML = `
+    <div class="bg-white rounded-2xl p-4 md:p-5 shadow-[0_10px_30px_rgba(30,41,59,0.15)] animate-slide-up">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="animate-pulse-dot w-3 h-3 bg-[#004ac6] rounded-full flex-shrink-0"></div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-bold text-[#191b23]">Viaje en curso</p>
+          <p class="text-xs text-[#434655]">Llevando a ${userName} al destino</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3 p-3 bg-[#f0f7ff] rounded-xl mb-4">
+        <span class="material-symbols-outlined text-[#004ac6]">location_on</span>
+        <p class="text-xs text-[#434655]">Destino: ${ride.toName ? ride.toName.slice(0, 60) : 'Destino'}</p>
+      </div>
+
+      <button id="complete-btn" class="w-full h-11 bg-[#2e7d32] text-white text-sm font-semibold rounded-xl hover:bg-[#1b5e20] transition-all">
+        Completar Viaje
+      </button>
+    </div>
+  `;
+
+  document.getElementById('complete-btn').addEventListener('click', () => {
+    APP.completeTrip(ride.id);
+    showCompletedView();
+  });
+}
+
+function showCompletedView() {
+  stopTripPolling();
+  const activeView = document.getElementById('active-ride-view');
+  document.getElementById('status-text').textContent = 'Viaje completado';
+  document.getElementById('available-badge').innerHTML = '<span class="w-1.5 h-1.5 bg-[#2e7d32] rounded-full"></span> Disponible';
+  document.getElementById('available-badge').className = 'flex items-center gap-1.5 text-xs font-medium text-[#2e7d32] bg-[#e8f5e9] px-3 py-1 rounded-full';
+
+  activeView.innerHTML = `
+    <div class="bg-white rounded-2xl p-4 md:p-5 shadow-[0_10px_30px_rgba(30,41,59,0.15)] animate-slide-up text-center">
+      <div class="inline-flex items-center justify-center w-14 h-14 bg-[#e8f5e9] rounded-full mb-3">
+        <span class="material-symbols-outlined text-[#2e7d32] text-[32px]" style="font-variation-settings:'FILL' 1;">check_circle</span>
+      </div>
+      <p class="text-base font-bold text-[#191b23]">Viaje completado</p>
+      <p class="text-sm text-[#434655] mt-1">Gracias por conducir con ChasquiMoto</p>
+      <button id="back-btn" class="mt-4 w-full h-11 bg-[#004ac6] text-white text-sm font-semibold rounded-xl hover:bg-[#2563eb] transition-all">
+        Buscar más viajes
+      </button>
+    </div>
+  `;
+
+  document.getElementById('back-btn').addEventListener('click', () => {
+    activeRideId = null;
+    document.getElementById('active-ride-view').classList.add('hidden');
+    document.getElementById('requests-view').classList.remove('hidden');
+    document.getElementById('status-text').textContent = 'Esperando solicitudes...';
+    if (userPickupMarker) { map.removeLayer(userPickupMarker); userPickupMarker = null; }
+    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    const c = driverMarker.getLatLng();
+    map.setView([c.lat, c.lng], 13);
+    loadRequests();
+    startPolling();
+  });
+}
+
+function startPolling() {
+  stopPolling();
+  if (!driverAvailable) return;
+  loadRequests();
+  pollInterval = setInterval(loadRequests, 5000);
+}
+
+function stopPolling() {
+  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+}
+
+document.getElementById('avatar-btn').addEventListener('click', () => {
+  document.getElementById('dropdown-menu').classList.toggle('hidden');
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#avatar-btn') && !e.target.closest('#dropdown-menu')) {
+    document.getElementById('dropdown-menu').classList.add('hidden');
+  }
+});
+document.getElementById('logout-btn').addEventListener('click', () => APP.logout());
+
+/* ─── Auth overlay (login/register for drivers) ─── */
+
+document.getElementById('auth-tab-login').addEventListener('click', () => {
+  document.getElementById('auth-tab-login').className = 'flex-1 py-2 text-sm font-semibold text-[#004ac6] border-b-2 border-[#004ac6]';
+  document.getElementById('auth-tab-register').className = 'flex-1 py-2 text-sm font-semibold text-[#737686] border-b-2 border-transparent';
+  document.getElementById('auth-login-form').classList.remove('hidden');
+  document.getElementById('auth-reg-form').classList.add('hidden');
+});
+
+document.getElementById('auth-tab-register').addEventListener('click', () => {
+  document.getElementById('auth-tab-register').className = 'flex-1 py-2 text-sm font-semibold text-[#004ac6] border-b-2 border-[#004ac6]';
+  document.getElementById('auth-tab-login').className = 'flex-1 py-2 text-sm font-semibold text-[#737686] border-b-2 border-transparent';
+  document.getElementById('auth-reg-form').classList.remove('hidden');
+  document.getElementById('auth-login-form').classList.add('hidden');
+});
+
+document.getElementById('auth-login-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const email = document.getElementById('auth-login-email').value;
+  const password = document.getElementById('auth-login-pass').value;
+  const errorEl = document.getElementById('auth-error');
+  errorEl.classList.add('hidden');
+
+  const result = APP.login(email, password);
+  if (!result.success) {
+    errorEl.textContent = result.error;
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  if (result.user.role !== 'driver') {
+    errorEl.textContent = 'Esta cuenta no es de conductor. Usa una cuenta de conductor.';
+    errorEl.classList.remove('hidden');
+    APP.logout();
+    return;
+  }
+  initDriverUI();
+});
+
+document.getElementById('auth-reg-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = document.getElementById('auth-reg-name').value;
+  const email = document.getElementById('auth-reg-email').value;
+  const phone = document.getElementById('auth-reg-phone').value;
+  const password = document.getElementById('auth-reg-pass').value;
+  const carModel = document.getElementById('auth-reg-model').value;
+  const carColor = document.getElementById('auth-reg-color').value;
+  const carPlate = document.getElementById('auth-reg-plate').value;
+  const errorEl = document.getElementById('auth-error');
+  errorEl.classList.add('hidden');
+
+  if (!name || !email || !phone || !password || !carModel || !carColor || !carPlate) {
+    errorEl.textContent = 'Todos los campos son obligatorios.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+
+  const result = APP.register(name, email, phone, password, 'driver');
+  if (!result.success) {
+    errorEl.textContent = result.error;
+    errorEl.classList.remove('hidden');
+    return;
+  }
+
+  const users = APP.getUsers();
+  const driverUser = users.find(u => u.email === email);
+  if (driverUser) {
+    driverUser.car = { model: carModel, color: carColor, plate: carPlate };
+    APP.saveUsers(users);
+  }
+
+  APP.login(email, password);
+  initDriverUI();
+});
+
+initDriverUI();
+</script>
+</body>
+</html>
