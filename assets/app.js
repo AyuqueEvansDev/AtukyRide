@@ -3,28 +3,77 @@ const APP = {
   SESSION_KEY: 'chasquimoto_session',
   RIDES_KEY: 'chasquimoto_rides',
 
+  /* ─── Cross-navigation storage (localStorage + window.name fallback) ─── */
+
+  _get(key, defaultVal) {
+    const val = localStorage.getItem(key);
+    if (val !== null) return JSON.parse(val);
+    try {
+      const all = JSON.parse(window.name || '{}');
+      if (all && key in all) return all[key];
+    } catch (e) { /* window.name not available */ }
+    return defaultVal;
+  },
+
+  _set(key, value) {
+    localStorage.setItem(key, JSON.stringify(value));
+    try {
+      const all = JSON.parse(window.name || '{}');
+      all[key] = value;
+      window.name = JSON.stringify(all);
+    } catch (e) { /* window.name not available */ }
+  },
+
+  _remove(key) {
+    localStorage.removeItem(key);
+    try {
+      const all = JSON.parse(window.name || '{}');
+      delete all[key];
+      window.name = JSON.stringify(all);
+    } catch (e) { /* window.name not available */ }
+  },
+
+  getUrlParam(name) {
+    return new URLSearchParams(window.location.search).get(name);
+  },
+
   /* ─── Auth ─── */
 
   getUsers() {
-    return JSON.parse(localStorage.getItem(this.STORAGE_KEY) || '[]');
+    return this._get(this.STORAGE_KEY, []);
   },
 
   saveUsers(users) {
-    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(users));
+    this._set(this.STORAGE_KEY, users);
   },
 
   getSession() {
-    return JSON.parse(localStorage.getItem(this.SESSION_KEY) || 'null');
+    return this._get(this.SESSION_KEY, null);
   },
 
   saveSession(email, role) {
-    localStorage.setItem(this.SESSION_KEY, JSON.stringify({
+    this._set(this.SESSION_KEY, {
       email, role, timestamp: Date.now()
-    }));
+    });
   },
 
   clearSession() {
-    localStorage.removeItem(this.SESSION_KEY);
+    this._remove(this.SESSION_KEY);
+  },
+
+  restoreSessionFromUrl() {
+    const email = this.getUrlParam('session');
+    const role = this.getUrlParam('role');
+    if (email && role && !this.getSession()) {
+      const users = this.getUsers();
+      if (users.find(u => u.email === email)) {
+        this.saveSession(email, role);
+      }
+      const url = new URL(window.location);
+      url.searchParams.delete('session');
+      url.searchParams.delete('role');
+      window.history.replaceState({}, '', url);
+    }
   },
 
   register(name, email, phone, password, role) {
@@ -89,7 +138,7 @@ const APP = {
     if (user.role !== role) {
       const target = user.role === 'driver' ? 'conductor.html' : 'principal.html';
       if (!window.location.pathname.endsWith(target)) {
-        window.location.href = target;
+        window.location.href = target + '?session=' + encodeURIComponent(user.email) + '&role=' + user.role;
       }
       return null;
     }
@@ -105,10 +154,17 @@ const APP = {
 
   /* ─── Drivers & Seed ─── */
 
-  seedDrivers() {
+  seedUsers() {
     const users = this.getUsers();
     const existingDrivers = users.filter(u => u.role === 'driver');
-    if (existingDrivers.length >= 3) return;
+    if (existingDrivers.length >= 3 && users.find(u => u.email === 'maria@chasquimoto.com')) return;
+
+    if (!users.find(u => u.email === 'maria@chasquimoto.com')) {
+      users.push({
+        name: 'María García', email: 'maria@chasquimoto.com', phone: '+52 55 1111 2222',
+        password: 'user123', role: 'user', created: Date.now() - 86400000 * 30
+      });
+    }
 
     const fakeDrivers = [
       {
@@ -165,11 +221,11 @@ const APP = {
   /* ─── Rides ─── */
 
   getRides() {
-    return JSON.parse(localStorage.getItem(this.RIDES_KEY) || '[]');
+    return this._get(this.RIDES_KEY, []);
   },
 
   saveRides(rides) {
-    localStorage.setItem(this.RIDES_KEY, JSON.stringify(rides));
+    this._set(this.RIDES_KEY, rides);
   },
 
   createRide(userEmail, fromName, toName, fromCoords, toCoords) {
@@ -303,9 +359,10 @@ const APP = {
 };
 
 (function migrate() {
-  const users = JSON.parse(localStorage.getItem(APP.STORAGE_KEY) || '[]');
+  const users = APP._get(APP.STORAGE_KEY, []);
   let changed = false;
   users.forEach(u => { if (!u.role) { u.role = 'user'; changed = true; } });
-  if (changed) localStorage.setItem(APP.STORAGE_KEY, JSON.stringify(users));
+  if (changed) APP._set(APP.STORAGE_KEY, users);
 })();
-APP.seedDrivers();
+APP.seedUsers();
+APP.restoreSessionFromUrl();

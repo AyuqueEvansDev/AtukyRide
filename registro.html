@@ -223,13 +223,15 @@ document.getElementById('reg-form').addEventListener('submit', (e) => {
     }
   }
 
+  APP.saveSession(email, selectedRole);
   successEl.textContent = 'Cuenta creada con éxito. Redirigiendo...';
   successEl.classList.remove('hidden');
   btn.disabled = true;
   btn.innerHTML = '<span class="material-symbols-outlined animate-spin">progress_activity</span>';
 
   setTimeout(() => {
-    window.location.href = 'login.html';
+    const redirectTo = selectedRole === 'driver' ? 'conductor.html' : 'principal.html';
+    window.location.href = redirectTo + '?session=' + encodeURIComponent(email) + '&role=' + selectedRole;
   }, 1500);
 });
 </script>

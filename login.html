@@ -113,7 +113,7 @@ document.getElementById('login-form').addEventListener('submit', (e) => {
 
   const redirectTo = result.user.role === 'driver' ? 'conductor.html' : 'principal.html';
   setTimeout(() => {
-    window.location.href = redirectTo;
+    window.location.href = redirectTo + '?session=' + encodeURIComponent(email) + '&role=' + result.user.role;
   }, 800);
 });
 </script>
